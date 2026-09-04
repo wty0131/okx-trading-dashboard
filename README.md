@@ -21,7 +21,7 @@ SMA 双均线 · EMA+RSI 趋势过滤 · 布林带均值回归 · MACD 趋势 ·
 ## 🚀 快速开始
 
 ```bash
-git clone <本仓库地址>
+git clone https://github.com/wty0131/okx-trading-dashboard.git
 cd okx-trading-dashboard
 python -m venv .venv
 .venv\Scripts\activate            # Windows
