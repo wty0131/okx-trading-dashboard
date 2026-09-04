@@ -1,0 +1,26 @@
+﻿# Python
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# 密钥（绝不提交）
+.env
+*.key
+
+# 数据与状态
+data/*.db
+data/*.sqlite3
+data/cache/
+data/paper_state/
+*.parquet
+
+# 运行产物
+logs/*.log
+output/
+.DS_Store
+Thumbs.db
+
+data/paper_state_1h/
+docs/*.csv
+
