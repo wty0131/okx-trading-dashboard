@@ -23,6 +23,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -135,18 +136,25 @@ class OkxClient:
         params: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, str]] = None,
         json_body: Optional[Dict[str, Any]] = None,
+        raw_body: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """执行一次请求并统一校验 OKX 返回结构。"""
+        """执行一次请求并统一校验 OKX 返回结构。
+
+        raw_body：已序列化好的 JSON 字符串。交易类 POST 必须用它——
+        保证"参与签名的字符串"与"实际发送的字符串"完全一致。
+        """
         url = self.base_url + path
-        resp = self.session.request(
-            method,
-            url,
+        kwargs: Dict[str, Any] = dict(
             params=params,
             headers=headers,
-            json=json_body if method.upper() == "POST" else None,
             proxies=(self.proxies or None),
             timeout=self.timeout,
         )
+        if raw_body is not None:
+            kwargs["data"] = raw_body.encode("utf-8")
+        elif method.upper() == "POST":
+            kwargs["json"] = json_body
+        resp = self.session.request(method, url, **kwargs)
         if resp.status_code != 200:
             raise RuntimeError(f"OKX HTTP {resp.status_code}: {resp.text[:300]}")
         payload = resp.json()
@@ -322,4 +330,113 @@ class OkxClient:
         return self._signed_get(
             "/api/v5/account/positions", params, dry_run=dry_run,
             description="查询持仓（GET /api/v5/account/positions）",
+        )
+
+    # ------------------------------------------------------------------ #
+    # 私有：签名 POST（交易类接口；默认 dry_run 不发送）
+    # ------------------------------------------------------------------ #
+    def _signed_post(
+        self,
+        path: str,
+        body: Dict[str, Any],
+        dry_run: bool = True,
+        description: str = "",
+    ) -> Dict[str, Any]:
+        """构造并（可选）执行一次签名 POST。
+
+        dry_run=True（默认）：只返回"将要发送什么"的描述，绝不发送；
+        dry_run=False         ：真实发送（需凭据 + 出口 IP 命中白名单 +
+                                 该 API Key 具备对应权限）。签名与发送使用
+                                 同一份序列化字符串，避免签名不一致。
+        """
+        creds = self._require_credentials()
+        raw = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+        headers = sign_request(
+            "POST", path, body=raw,
+            api_key=creds["api_key"], secret=creds["secret"],
+            passphrase=creds["passphrase"],
+        )
+        if dry_run:
+            return {
+                "dry_run": True,
+                "description": description or path,
+                "method": "POST",
+                "url": f"{self.base_url}{path}",
+                "body": body,
+                # headers 含签名，仅内存调试用，请勿打印/落盘
+            }
+        payload = self._request("POST", path, headers=headers, raw_body=raw)
+        return payload
+
+    def place_order(
+        self,
+        inst_id: str,
+        side: str,
+        sz: float,
+        ord_type: str = "market",
+        px: Optional[float] = None,
+        td_mode: str = "cash",
+        tgt_ccy: Optional[str] = None,
+        dry_run: bool = True,
+    ) -> Dict[str, Any]:
+        """下单（默认 dry_run 不发送）。
+
+        inst_id : 如 "BTC-USDT"
+        side    : "buy" / "sell"
+        sz      : 数量；市价买入时可配合 tgt_ccy="quote_ccy" 表示"按计价币金额下单"
+        ord_type: "market"（市价）/ "limit"（限价，需 px）
+        """
+        side = side.lower()
+        ord_type = ord_type.lower()
+        if side not in ("buy", "sell"):
+            raise ValueError("side 只能是 buy / sell")
+        if ord_type not in ("market", "limit"):
+            raise ValueError("ord_type 只能是 market / limit")
+        body: Dict[str, Any] = {
+            "instId": inst_id,
+            "tdMode": td_mode,
+            "side": side,
+            "ordType": ord_type,
+            "sz": str(sz),
+        }
+        if ord_type == "limit":
+            if px is None or px <= 0:
+                raise ValueError("限价单必须给出正的 px")
+            body["px"] = str(px)
+        if tgt_ccy:
+            body["tgtCcy"] = tgt_ccy
+        return self._signed_post(
+            "/api/v5/trade/order", body, dry_run=dry_run,
+            description=f"下单 {side} {sz} {inst_id} ({ord_type})",
+        )
+
+    def cancel_order(
+        self,
+        inst_id: str,
+        ord_id: Optional[str] = None,
+        cl_ord_id: Optional[str] = None,
+        dry_run: bool = True,
+    ) -> Dict[str, Any]:
+        """撤单（需 ordId 或 clOrdId 之一；默认 dry_run 不发送）。"""
+        if not ord_id and not cl_ord_id:
+            raise ValueError("必须提供 ord_id 或 cl_ord_id")
+        body: Dict[str, Any] = {"instId": inst_id}
+        if ord_id:
+            body["ordId"] = str(ord_id)
+        if cl_ord_id:
+            body["clOrdId"] = str(cl_ord_id)
+        return self._signed_post(
+            "/api/v5/trade/cancel-order", body, dry_run=dry_run,
+            description=f"撤单 {inst_id} ordId={ord_id or cl_ord_id}",
+        )
+
+    def get_pending_orders(self, inst_id: Optional[str] = None,
+                           dry_run: bool = False) -> Dict[str, Any]:
+        """查询未成交挂单（只读 GET；dry_run 默认 False 便于展示）。"""
+        params: Dict[str, Any] = {}
+        if inst_id:
+            params["instId"] = inst_id
+        return self._signed_get(
+            "/api/v5/trade/orders-pending", params, dry_run=dry_run,
+            description="查询挂单（GET /api/v5/trade/orders-pending）",
         )
