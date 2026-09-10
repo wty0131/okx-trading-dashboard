@@ -84,6 +84,32 @@ if st.button("🧪 测试 get_balance(dry_run=True)", key="set_balance"):
 st.write("---")
 
 # --------------------------------------------------------------------------- #
+# 实盘交易总开关
+# --------------------------------------------------------------------------- #
+st.subheader("⚡ 实盘交易总开关")
+_lt = C.live_trading_enabled()
+if _lt:
+    st.success("当前状态：**已开启** —— 「实盘交易」页可真实下单"
+               "（仍需勾选确认 + 输入 CONFIRM + 受单笔/单日上限约束）")
+else:
+    st.info("当前状态：**未开启** —— 「实盘交易」页为只读，不显示任何下单表单")
+st.caption("开关写入本机 `.env`（`OKX_TRADING_ENABLED`，该文件已被 `.gitignore` 排除）；"
+           "即时生效，重启面板后依然保留。")
+if _lt:
+    off_ack = st.checkbox("我确认要关闭实盘交易", key="lt_off_ack")
+    if st.button("🔒 关闭实盘交易", key="lt_off", disabled=not off_ack):
+        st.success(C.set_live_trading(False))
+        st.rerun()
+else:
+    st.warning("开启后「实盘交易」页即可真实发送订单、动用真实资金。")
+    on_ack = st.checkbox("我已知悉风险，确认开启实盘交易", key="lt_on_ack")
+    if st.button("⚡ 开启实盘交易", key="lt_on", type="primary", disabled=not on_ack):
+        st.success(C.set_live_trading(True))
+        st.rerun()
+
+st.write("---")
+
+# --------------------------------------------------------------------------- #
 # 填写 API Key（用户自填；仅本机 .env 或本次会话）
 # --------------------------------------------------------------------------- #
 import os as _os

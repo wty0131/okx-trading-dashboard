@@ -80,14 +80,11 @@ SMA 双均线 · EMA+RSI 趋势过滤 · 布林带均值回归 · MACD 趋势 ·
 
 要真正下单，必须**同时**满足：
 
-1. 启动时显式开启实盘开关（在启动命令前设环境变量）：
-   ```bash
-   set OKX_TRADING_ENABLED=1        # Windows cmd
-   # PowerShell: $env:OKX_TRADING_ENABLED="1"
-   .venv\Scripts\python -m streamlit run app\Home.py
-   ```
+1. **打开实盘总开关**（二选一）：
+   - 面板里 **「设置」页 → ⚡ 实盘交易总开关 → 勾选确认 → 开启**（写入本机 `.env`，即时生效、重启保留）；或
+   - 启动时设环境变量：`$env:OKX_TRADING_ENABLED="1"`（PowerShell）后再启动面板；
 2. 你的 API Key **勾选了「交易」权限**，且请求出口 IP 在该 Key 的白名单内；
-3. 页面里关闭 dry-run → 勾选风险确认 → 输入 `CONFIRM`；
+3. 页面里勾选风险确认 → 输入 `CONFIRM`；
 4. 下单金额受**单笔上限 / 单日累计上限**约束（默认 10 / 30 USDT，可在页面调整）。
 
 > 💡 强烈建议：策略先在「模拟盘」跑够时间再考虑小额手动实盘；本面板**不提供策略自动下单**。

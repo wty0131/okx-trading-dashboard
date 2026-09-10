@@ -559,4 +559,47 @@ def env_summary() -> Dict[str, str]:
         "api_key": "已配置" if os.environ.get("OKX_API_KEY", "").strip() else "未配置",
         "secret": "已配置" if os.environ.get("OKX_SECRET", "").strip() else "未配置",
         "passphrase": "已配置" if os.environ.get("OKX_PASSPHRASE", "").strip() else "未配置",
+        "live_trading": "已开启" if live_trading_enabled() else "未开启",
     }
+
+
+# --------------------------------------------------------------------------- #
+# 实盘交易总开关（写入本机 .env，即时生效；.env 已被 gitignore 排除）
+# --------------------------------------------------------------------------- #
+LIVE_FLAG_KEY = "OKX_TRADING_ENABLED"
+
+
+def live_trading_enabled() -> bool:
+    """实盘交易是否开启（读取环境变量；.env 由启动时/设置页写入）。"""
+    return os.environ.get(LIVE_FLAG_KEY, "0").strip() == "1"
+
+
+def set_live_trading(enabled: bool, env_path: Optional[Path] = None) -> str:
+    """开启/关闭实盘交易：只改动 .env 里的 OKX_TRADING_ENABLED 一行。
+
+    * 保留 .env 中其它内容（尤其是密钥）；
+    * 同时更新当前进程环境变量，故立即生效；
+    * 返回给用户看的提示文本。
+    """
+    path = Path(env_path) if env_path is not None else (ROOT / ".env")
+    lines: List[str] = []
+    if path.exists():
+        lines = path.read_text(encoding="utf-8").splitlines()
+    value = "1" if enabled else "0"
+    out: List[str] = []
+    found = False
+    for line in lines:
+        if line.strip().startswith(f"{LIVE_FLAG_KEY}="):
+            out.append(f"{LIVE_FLAG_KEY}={value}")
+            found = True
+        else:
+            out.append(line)
+    if not found:
+        if out and out[-1].strip():
+            out.append("")
+        out.append("# 实盘交易总开关（1=允许「实盘交易」页真实下单；0=关闭）")
+        out.append(f"{LIVE_FLAG_KEY}={value}")
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    os.environ[LIVE_FLAG_KEY] = value
+    return ("✅ 实盘交易已开启（已写入本机 .env，仅本机生效）"
+            if enabled else "🔒 实盘交易已关闭")

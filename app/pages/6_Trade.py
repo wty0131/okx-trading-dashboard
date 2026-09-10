@@ -28,7 +28,7 @@ from okx.okx_client import OkxClient
 
 C.inject_css()
 
-LIVE_ENABLED = os.environ.get("OKX_TRADING_ENABLED", "0") == "1"
+LIVE_ENABLED = C.live_trading_enabled()
 
 st.markdown('<div class="okx-title">实盘交易 Trade</div>', unsafe_allow_html=True)
 st.markdown('<div class="okx-sub">真实下单到 OKX · 与「模拟盘」页完全独立</div>',
@@ -38,7 +38,10 @@ if not LIVE_ENABLED:
     st.error("🚫 **实盘未启用**：本页当前不可下单。")
     st.markdown(
         """
-要启用真实交易，请在**启动面板时**显式打开开关：
+**开启方式（推荐）**：左侧 **「设置」页 → ⚡ 实盘交易总开关** → 勾选风险确认后点「开启实盘交易」。
+开关会写入本机 `.env`（`OKX_TRADING_ENABLED=1`，已被 gitignore 排除），即时生效并重启保留。
+
+也可以用启动环境变量（效果相同）：
 
 ```powershell
 # PowerShell
@@ -46,13 +49,7 @@ $env:OKX_TRADING_ENABLED="1"
 .venv\\Scripts\\python -m streamlit run app\\Home.py
 ```
 
-```bat
-:: cmd
-set OKX_TRADING_ENABLED=1
-.venv\\Scripts\\python -m streamlit run app\\Home.py
-```
-
-启用后还需：① API Key 具备**交易权限**；② 请求出口 IP 在该 Key 的**白名单**内；
+开启后还需：① API Key 具备**交易权限**；② 请求出口 IP 在该 Key 的**白名单**内；
 ③ 页面上勾选风险确认并输入 `CONFIRM`。下单金额受**单笔/单日上限**约束。
 
 > 💡 想先练手请用左侧「模拟盘」页：真实行情 + 本地记账，不会花一分钱。
