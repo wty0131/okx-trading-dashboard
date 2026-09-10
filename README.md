@@ -86,6 +86,7 @@ SMA 双均线 · EMA+RSI 趋势过滤 · 布林带均值回归 · MACD 趋势 ·
 2. 你的 API Key **勾选了「交易」权限**，且请求出口 IP 在该 Key 的白名单内；
 3. 页面里勾选风险确认 → 输入 `CONFIRM`；
 4. 下单金额受**单笔上限 / 单日累计上限**约束（默认 10 / 30 USDT，可在页面调整）。
+   这是 **fail-closed** 闸门：**无法估算订单 USDT 金额时（行情不可用、参数异常等）一律拦截**，而不是跳过上限检查；单日累计金额**落盘**保存（`data/trade_usage.json`，UTC 日期分桶），刷新页面**不会**清零。
 
 > 💡 强烈建议：策略先在「模拟盘」跑够时间再考虑小额手动实盘；本面板**不提供策略自动下单**。
 
@@ -123,14 +124,63 @@ OKX_PROXY=http://127.0.0.1:7897
 
 ## 🧪 自检（给想二次开发的人）
 ```bash
-.venv\Scripts\python scripts\selfcheck.py               # 核心引擎自检
-.venv\Scripts\python scripts\selfcheck_strategies.py    # 7 个策略自检
-.venv\Scripts\python scripts\selfcheck_ui.py            # 界面组件自检
+.venv\Scripts\python scripts\selfcheck.py                    # 核心引擎自检
+.venv\Scripts\python scripts\selfcheck_strategies.py         # 7 个策略自检
+.venv\Scripts\python scripts\selfcheck_ui.py                 # 界面组件自检
+.venv\Scripts\python scripts\selfcheck_bars_and_limits.py    # K 线收盘判定 + 实盘限额（离线）
+.venv\Scripts\python scripts\selfcheck_env_file.py           # .env 增量更新（全程用临时文件）
 ```
+
+## ✅ 正确性与安全修复记录
+
+### 2026-09-11
+
+**① 未收盘的「半根 K 线」被当成收盘价（数据正确性）**
+
+OKX 的 candles 接口会连同**正在形成的当前 K 线**一起返回（其 `confirm` 字段为 `"0"`）。
+原实现在列裁剪时把 `confirm` 丢弃，调用方无从判断，模拟盘据此记账会污染净值；
+**更严重的是它会把锚点推进到该 bar，导致这根 K 线的最终数据此后被永久跳过**
+（增量只补 `索引 > 锚点` 的部分）。
+
+修复：
+- `OkxClient.get_candles(..., drop_unclosed=False)` 新增参数，可直接丢弃未收盘的最后一根；
+- `data/market.is_bar_closed(ts, bar)` / `drop_unclosed_bars(df, bar)` —— 按**时间**推算
+  （`ts + 周期 ≤ now`），等价于 `confirm` 语义但**可作用于本地缓存**（缓存只有 5 列 OHLCV，没有 confirm）；
+- 模拟盘更新路径（`app/pages/4_Paper.py`）只喂已收盘的 K 线。
+
+**② 实盘下单限额可被静默绕过（资金安全）**
+
+原上限判定写作 `est_usdt is not None and est_usdt > cap_single`。一旦行情不可用或估算异常，
+`est_usdt` 为 `None`，**两道金额上限被整体跳过**，一笔无上限的真实订单会被放行。
+另外当日累计金额只存 `st.session_state`，**页面一刷新即归零**，「单日累计上限」实际退化为
+「单次页面会话上限」。
+
+修复：判定逻辑抽到 `app/trade_limits.py`（可独立测试），改为 **fail-closed** 并落盘累计。
+
+**③ 保存 API Key 会抹掉 `.env` 里的其他配置**
+
+设置页原实现**整文件覆写** `.env` 为 3 行，会抹掉 `OKX_PROXY` / `OKX_HTTP_PROXY` /
+`OKX_HTTPS_PROXY` / `OKX_MARKET_OFFLINE` / **`OKX_TRADING_ENABLED`**。
+最坏的连锁反应是：用户只是想改个代理，**实盘总开关却被静默关闭（或打开）**。
+
+修复：新增 `app/env_file.update_env_file()`，**按 key 增量更新**——只替换目标键，
+其余行（注释、空行、其他键与原有顺序）逐行保留；写盘前备份为 `.env.bak`，
+写盘用「临时文件 + 原子替换」，中途崩溃不会留下半截文件。
+
+**④ 新增两个可测试的纯逻辑模块**
+
+`app/pages/6_Trade.py`、`app/pages/5_Settings.py` 是 Streamlit 页面，**import 即渲染**，
+无法在自检中导入测试。因此把资金安全相关的判定抽到：
+- `app/trade_limits.py` —— 限额闸门 + 当日累计持久化
+- `app/env_file.py` —— `.env` 增量更新 + 密钥脱敏
+
+这两个模块**绝不打印、不记录、不返回任何密钥值**，只回报被更新的键名。
 
 ## 📁 项目结构（简单版）
 ```
 app/            界面（Streamlit，中文导航：总览/行情/策略库/回测/模拟盘/设置/实盘交易）
+  trade_limits.py   实盘限额闸门（fail-closed）+ 当日累计持久化
+  env_file.py       .env 按 key 增量更新 + 密钥脱敏
 okx/            OKX API 客户端（纯 requests，无第三方交易所库）
 strategies/     策略库（自动注册，可加自己的策略）
 backtest/       历史回测引擎

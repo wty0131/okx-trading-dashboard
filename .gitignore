@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 .venv/
 __pycache__/
 *.pyc
@@ -6,6 +6,10 @@ __pycache__/
 
 # 密钥（绝不提交）
 .env
+# 保存 API Key 时自动生成的备份与临时文件 —— 内容与 .env 相同（含真实密钥），
+# 必须一并忽略，否则一次「保存并测试」就会把密钥带进版本库。
+.env.bak
+.env.tmp
 *.key
 
 # 数据与状态
@@ -23,4 +27,7 @@ Thumbs.db
 
 data/paper_state_1h/
 docs/*.csv
+
+# 实盘当日累计下单金额（运行时状态，不含密钥）
+data/trade_usage.json
 

@@ -180,6 +180,7 @@ class OkxClient:
         limit: int = 100,
         after: Optional[str] = None,
         before: Optional[str] = None,
+        drop_unclosed: bool = False,
     ) -> pd.DataFrame:
         """获取 K 线（candles），封装为 pandas DataFrame。
 
@@ -193,6 +194,12 @@ class OkxClient:
         bar     : 粒度，常用 1H / 4H / 1D（白名单见 ALLOWED_BARS）
         limit   : 条数，1~300（超出自动截断到 300）
         after/before : 分页游标（毫秒时间戳字符串），一般用不到
+        drop_unclosed : True 时丢弃末尾**尚未收盘**的那根 K 线。
+            OKX 的 candles 接口会把当前正在形成的 K 线一并返回（其
+            ``confirm`` 字段为 "0"）。那是「半根 K 线」——拿它当收盘价记账
+            会污染模拟盘净值，把游标推进到该 bar 还会导致其最终数据此后被
+            永久跳过。默认 False（保持既有调用方行为不变），记账/决策类
+            调用方应显式传 True。
         """
         if bar not in ALLOWED_BARS:
             raise ValueError(f"不支持的 K 线粒度 bar={bar!r}，可选：{sorted(ALLOWED_BARS)}")
@@ -211,13 +218,17 @@ class OkxClient:
         # OKX 数值均为字符串，逐列转 float
         for col in ("open", "high", "low", "close", "vol"):
             df[col] = pd.to_numeric(df[col], errors="coerce")
-        # 时间戳：毫秒 -> UTC 时间索引；OKX 返回倒序，转升序
+        # 时间戳：毫秒 -> UTC 时间索引；OKX 返回倒序，先转升序
         df["time"] = pd.to_datetime(df["ts"].astype("int64"), unit="ms", utc=True)
-        df = (
-            df.set_index("time")
-            .sort_index()
-            .loc[:, ["open", "high", "low", "close", "vol"]]
-        )
+        df = df.set_index("time").sort_index()
+
+        # confirm：OKX 标记该根 K 线是否已收盘（"1" = 已收盘，"0" = 仍在形成）。
+        # 上面已排序，故最后一根才是「最新」的那根。注意必须在丢弃 confirm 列
+        # 之前判断。
+        if drop_unclosed and len(df) and str(df["confirm"].iloc[-1]) != "1":
+            df = df.iloc[:-1]
+
+        df = df.loc[:, ["open", "high", "low", "close", "vol"]]
         df.index.name = "time"
         return df
 

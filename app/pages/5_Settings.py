@@ -135,13 +135,20 @@ with st.form("api_key_form", border=True):
 if sub2:
     vals = [v.strip() for v in (k_in, s_in, p_in)]
     if persist.startswith("保存到本机"):
-        env_path = C.ROOT / ".env"
-        lines = ["# okx_system 本地密钥（gitignore 已排除，绝不提交）",
-                 f"OKX_API_KEY={vals[0] or ''}",
-                 f"OKX_SECRET={vals[1] or ''}",
-                 f"OKX_PASSPHRASE={vals[2] or ''}"]
-        env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        st.toast("已写入本机 .env（不入 git）")
+        # 按 key 增量更新，**保留** .env 里的其他键与注释。
+        # 原实现整文件覆写为 3 行，会抹掉 OKX_PROXY* / OKX_MARKET_OFFLINE /
+        # OKX_TRADING_ENABLED —— 用户可能只是想改个代理，结果实盘总开关被静默关掉。
+        from app.env_file import update_env_file  # noqa: PLC0415
+        res = update_env_file(
+            C.ROOT / ".env",
+            {"OKX_API_KEY": vals[0], "OKX_SECRET": vals[1],
+             "OKX_PASSPHRASE": vals[2]},
+            header="# okx_system 本地密钥（gitignore 已排除，绝不提交）",
+        )
+        _kept = res["preserved"]
+        st.toast(f"已写入本机 .env（保留原有 {_kept} 行其他配置；不入 git）")
+        if res["added"]:
+            st.caption("新增键：" + "、".join(res["added"]))
     for kk, vv in (("OKX_API_KEY", vals[0]), ("OKX_SECRET", vals[1]),
                    ("OKX_PASSPHRASE", vals[2])):
         if vv:
@@ -149,8 +156,9 @@ if sub2:
     _os.environ.pop("OKX_API_KEY", None) if not vals[0] else None
     _os.environ.pop("OKX_SECRET", None) if not vals[1] else None
     _os.environ.pop("OKX_PASSPHRASE", None) if not vals[2] else None
+    from app.env_file import mask_value  # noqa: PLC0415
     masked = " · ".join(
-        f"{name}={'已配置(末4位 ' + v[-4:] + ')' if v else '未填写'}"
+        f"{name}={mask_value(v)}"
         for name, v in (("Key", vals[0]), ("Secret", vals[1]), ("Pass", vals[2])))
     st.success(masked)
     out = C.test_account_api()

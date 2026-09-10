@@ -200,6 +200,47 @@ def _http_json(url: str, params: Dict[str, Any], proxies: Dict[str, str],
     return resp.json()
 
 
+def is_bar_closed(ts: Any, bar: str, now: Optional[float] = None) -> bool:
+    """该根 K 线是否已收盘（按时间推算）。
+
+    数据源会用 ``confirm`` 字段标记 K 线是否收盘，但本地缓存只存
+    open/high/low/close/vol 五列，**没有 confirm**。因此这里改用时间算术：
+    K 线开盘时刻为 ts、周期为 BAR_MS[bar]，故 ``ts + bar_ms <= now`` 即已收盘。
+    与 OKX 的 confirm 语义等价，且可作用于缓存数据。
+
+    Args:
+        ts:  K 线开盘时刻（Timestamp / datetime / ISO 字符串 / epoch 秒）
+        bar: 粒度，如 "1H" / "1D"
+        now: 当前时间（epoch 秒）；None = 取系统当前时间
+
+    Returns:
+        True 表示已收盘。未知粒度时返回 True（不阻断，保持向后兼容）。
+    """
+    bar_ms = BAR_MS.get(bar)
+    if bar_ms is None:
+        return True
+    now_ms = int((now if now is not None else _time.time()) * 1000)
+    return _to_ms(ts) + bar_ms <= now_ms
+
+
+def drop_unclosed_bars(df: pd.DataFrame, bar: str,
+                       now: Optional[float] = None) -> pd.DataFrame:
+    """丢弃末尾尚未收盘的 K 线，返回只含已收盘 bar 的 DataFrame。
+
+    未收盘的最后一根是「半根 K 线」：它的 high/low/close 都还在变动。
+    拿它记账会污染模拟盘净值；把游标推进到它还会导致其最终数据此后被永久
+    跳过（下次增量只补 index > 游标 的部分）。记账与决策路径应先用本函数过滤。
+
+    全部 bar 都未收盘时返回空表（调用方需判空），不会退回原表。
+    """
+    if df is None or df.empty:
+        return df
+    closed = [is_bar_closed(ts, bar, now) for ts in df.index]
+    if all(closed):
+        return df
+    return df[closed]
+
+
 def _to_ms(ts: Any) -> int:
     """Timestamp / datetime / ISO 字符串 / epoch 秒 -> 毫秒 int。"""
     if isinstance(ts, pd.Timestamp):

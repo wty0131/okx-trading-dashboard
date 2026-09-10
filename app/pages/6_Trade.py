@@ -20,6 +20,14 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+# 资金安全相关的判定逻辑抽到 app/trade_limits.py —— 本页 import 即渲染，
+# 无法被自检脚本直接导入测试；限额判定必须可测。
+from app.trade_limits import (  # noqa: E402
+    add_daily_used as _add_daily_used,
+    check_order_limits as _check_order_limits,
+    load_daily_used as _load_daily_used,
+)
+
 import streamlit as st
 import pandas as pd
 
@@ -153,20 +161,27 @@ if submitted:
         else:
             df = C.market.get_candles_cached(trade_ccy, "1H", limit=2)
             last = float(df["close"].iloc[-1]) if not df.empty else None
-            if last:
+            if last and last > 0:
                 est_usdt = sz * last
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        print(f"[warn] 估算下单金额失败：{exc}")
         est_usdt = None
 
-    used_today = float(st.session_state.get("tr_used_today", 0.0))
+    used_today = _load_daily_used()
     blocked = None
     if not preview_only:
-        if est_usdt is not None and est_usdt > cap_single:
-            blocked = f"单笔金额 ≈{est_usdt:.2f} USDT 超过单笔上限 {cap_single:.2f}"
-        elif est_usdt is not None and used_today + est_usdt > cap_day:
-            blocked = f"今日累计 ≈{used_today + est_usdt:.2f} USDT 超过单日上限 {cap_day:.2f}"
-        elif (not ack) or confirm_word.strip().upper() != "CONFIRM":
-            blocked = "需勾选风险确认并输入 CONFIRM"
+        # 风控闸门（fail-closed）。原实现两道上限都写作
+        # `est_usdt is not None and ...`，行情不可用时 est_usdt 为 None →
+        # 两道金额上限被整体跳过，无上限的真实订单被静默放行。
+        blocked = _check_order_limits(
+            est_usdt=est_usdt,
+            used_today=used_today,
+            cap_single=cap_single,
+            cap_day=cap_day,
+            ack=ack,
+            confirm_word=confirm_word,
+            preview_only=preview_only,
+        )
 
     if blocked:
         st.error(f"🛑 已拦截：{blocked}")
@@ -184,12 +199,15 @@ if submitted:
                 st.success("✅ 实盘订单已提交")
                 st.json(result.get("data") or result)
                 if est_usdt:
-                    st.session_state["tr_used_today"] = used_today + est_usdt
+                    # 落盘累计（原实现只写 session_state，刷新即归零）
+                    used_now = _add_daily_used(est_usdt)
+                    st.session_state["tr_used_today"] = used_now
                 st.session_state["tr_refresh_flag"] = st.session_state.get("tr_refresh_flag", 0) + 1
         except Exception as exc:  # noqa: BLE001
             st.error(f"下单失败：{exc}")
 
-st.caption(f"今日已用量（估算）≈ {st.session_state.get('tr_used_today', 0.0):.2f} USDT")
+st.caption(f"今日（UTC）已用量（估算）≈ {_load_daily_used():.2f} USDT"
+           f"　·　数据落盘于 data/trade_usage.json，刷新页面不清零")
 
 # --------------------------------------------------------------------------- #
 # 撤单

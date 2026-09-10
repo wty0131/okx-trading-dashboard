@@ -80,6 +80,10 @@ def _advance(name: str) -> dict:
         raise RuntimeError("行情获取失败（所有源不可用且无缓存），无法更新。")
     warm = C.warm_strategy(sim, df, anchor, include_anchor=True)
     pending = df[df.index > anchor]
+    # 只喂「已收盘」的 K 线。未收盘的最后一根是半根 bar（high/low/close 仍在
+    # 变动），拿它记账会污染净值；更糟的是下面会把锚点推进到它，导致该 bar 的
+    # 最终数据此后被永久跳过（增量只补 index > 锚点 的部分）。
+    pending = C.market.drop_unclosed_bars(pending, env["bar"])
     if pending.empty:
         return {"fed": 0, "warm": warm, "action": None,
                 "new_anchor": anchor, "note": "无新 K 线（行情尚未刷新）"}
