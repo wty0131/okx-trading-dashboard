@@ -12,8 +12,6 @@ import pandas as pd
 
 from app import common as C
 
-st.set_page_config(page_title="策略库 · OKX 交易面板", page_icon="📚",
-                   layout="wide")
 C.inject_css()
 
 st.markdown('<div class="okx-title">策略库 Strategies</div>', unsafe_allow_html=True)

@@ -13,8 +13,6 @@ import pandas as pd
 from app import common as C
 from paper.simulator import PaperSimulator
 
-st.set_page_config(page_title="模拟盘 · OKX 交易面板", page_icon="🧾",
-                   layout="wide")
 C.inject_css()
 
 st.markdown('<div class="okx-title">模拟盘 Paper</div>', unsafe_allow_html=True)
